@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Name:    mempress.py
-# Version: 0.7.0
+# Version: 0.8.1
 # Author:  Kaius
 #
 # Memory pressure diagnostics for Linux (RHEL 8+, Ubuntu 22.04+, Debian 11+).
@@ -20,7 +20,7 @@ import sys
 import time
 
 
-VERSION = "0.7.0"
+VERSION = "0.8.1"
 
 
 class _Parser(argparse.ArgumentParser):
@@ -89,6 +89,9 @@ def build_parser():
     p.add_argument(
         "--top-n", type=_int_min(2), default=6, metavar="INT",
         help="ps lines to include in output, including header (default: 6, min: 2)",
+    )
+    p.add_argument(
+        "--version", action="version", version=f"%(prog)s {VERSION}",
     )
     return p
 
