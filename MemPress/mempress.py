@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Name:    mempress.py
-# Version: 0.3.0
+# Version: 0.4.0
 # Author:  Kaius
 #
 # Memory pressure diagnostics for Linux (RHEL 8+, Ubuntu 22.04+, Debian 11+).
@@ -17,7 +17,7 @@ import sys
 import time
 
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 
 
 class _Parser(argparse.ArgumentParser):
@@ -309,9 +309,91 @@ def collect_top_processes(top_n):
     return result
 
 
+def derive_signals(raw, capabilities, thresholds):
+    use_psi = capabilities["use_psi"]
+    s = {"use_psi": use_psi}
+
+    # Pass through all raw metrics; None when the probe did not supply the key.
+    for key in (
+        "psi_some_avg10", "psi_some_avg60", "psi_some_avg300",
+        "psi_full_avg10", "psi_full_avg60", "psi_full_avg300",
+        "direct_reclaim_delta", "kswapd_reclaim_delta",
+        "pswpin_delta", "pswpout_delta",
+        "pgmajfault_delta", "oom_kill_delta",
+        "swap_in_samples", "swap_out_samples",
+        "mem_total_mb", "mem_available_mb",
+    ):
+        s[key] = raw.get(key)
+
+    if use_psi:
+        required = [
+            "psi_some_avg10", "psi_some_avg60", "psi_some_avg300",
+            "psi_full_avg10", "psi_full_avg60", "psi_full_avg300",
+            "mem_total_mb", "mem_available_mb",
+            "direct_reclaim_delta", "kswapd_reclaim_delta",
+            "pswpin_delta", "pswpout_delta",
+            "pgmajfault_delta", "oom_kill_delta",
+        ]
+    else:
+        required = [
+            "mem_total_mb", "mem_available_mb",
+            "direct_reclaim_delta", "kswapd_reclaim_delta",
+            "pswpin_delta", "pswpout_delta",
+            "swap_in_samples", "swap_out_samples",
+        ]
+
+    def _present(k):
+        v = raw.get(k)
+        if v is None:
+            return False
+        if isinstance(v, list):
+            return len(v) > 0
+        return True
+
+    s["data_quality_ok"] = all(_present(k) for k in required)
+
+    # Pre-set all derived signals to None; populated below if data is available.
+    for k in (
+        "mem_available_pct", "low_memory",
+        "psi_some_elevated", "psi_full_elevated",
+        "swap_active", "swap_ops_total",
+        "direct_reclaim_active", "kswapd_active",
+        "oom_event", "severe_swap", "severe_direct",
+    ):
+        s[k] = None
+
+    if not s["data_quality_ok"]:
+        return s
+
+    mem_total = s["mem_total_mb"]
+    mem_avail = s["mem_available_mb"]
+    s["mem_available_pct"] = round((mem_avail / mem_total) * 100, 1)
+    s["low_memory"] = (
+        mem_avail <= thresholds["min_avail_mb"]
+        or s["mem_available_pct"] <= thresholds["min_avail_pct"]
+    )
+    s["direct_reclaim_active"] = s["direct_reclaim_delta"] > 0
+
+    if use_psi:
+        s["psi_some_elevated"] = s["psi_some_avg60"] >= thresholds["psi_some_warn"]
+        s["psi_full_elevated"] = s["psi_full_avg10"] >= thresholds["psi_full_pressure"]
+        s["swap_active"] = s["pswpin_delta"] > 0 or s["pswpout_delta"] > 0
+        s["oom_event"] = s["oom_kill_delta"] > 0
+    else:
+        si = s["swap_in_samples"]
+        so = s["swap_out_samples"]
+        s["swap_active"] = any(v > 0 for v in si + so)
+        s["swap_ops_total"] = sum(si) + sum(so)
+        s["kswapd_active"] = s["kswapd_reclaim_delta"] > 0
+        s["severe_swap"] = s["swap_ops_total"] >= thresholds["severe_swap_ops"]
+        s["severe_direct"] = s["direct_reclaim_delta"] >= thresholds["severe_direct_delta"]
+
+    return s
+
+
 def run(args):
     capabilities = detect_capabilities()
-    _ = capabilities  # phases 4-7 will consume this
+    _ = capabilities  # phases 5-7 will consume this
 
 
 def main():
