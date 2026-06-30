@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Name:    mempress.py
 # Version: 0.1.0
 # Author:  Kaius

@@ -207,3 +207,9 @@ The defaults are conservative by design.
 - [SPEC.md](SPEC.md): full behavioural specification, data model, and classification policy
 - [ARCHITECTURE.md](ARCHITECTURE.md): design decisions and rationale
 - [CHANGELOG.md](CHANGELOG.md): version history
+
+---
+
+## License
+
+Copyright (C) 2026 Kaius. Licensed under the [GNU Affero General Public License v3.0 or later](../LICENSE).

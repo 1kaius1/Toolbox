@@ -1,14 +1,14 @@
 # Toolbox
 
-A collection of sysadmin and power-user tools built to diagnose, inspect, automate common Linux system tasks, but also things I find interesting and cool. Each tool is a standalone utility that can be used interactively and/or wired into scripts and monitoring pipelines via parsable output.
+A collection of sysadmin and power-user tools: CLI diagnostics, GUI utilities, scripts, and other things I find interesting and useful. Each tool is standalone and covers a specific task. CLI tools produce parsable output suitable for automation pipelines; GUI tools are built for interactive use.
 
 ---
 
 ## Design goals
 
 - **Standalone tools.** Each tool runs without installing dependencies beyond the language runtime it targets. No package managers, no virtualenvs, no containers required to use a tool.
-- **Parsable output.** Every tool supports a machine-readable output mode (typically JSON) in addition to its human-readable default, so output can be consumed by scripts, monitoring agents, and automation pipelines.
-- **Explicit exit codes.** Tools use documented, stable exit codes. Scripts can branch on exit code without parsing output.
+- **Type-appropriate output.** CLI tools support machine-readable output (typically JSON) alongside human-readable output, so they can be consumed by scripts and monitoring agents. GUI tools are built for interactive use and are not expected to emit structured output.
+- **Explicit exit codes.** CLI tools use documented, stable exit codes. Scripts can branch on exit code without parsing output.
 - **Conservative by default.** Diagnostic tools favor false-negative avoidance over aggressive alerting. A tool should not cry wolf.
 
 ---
@@ -38,9 +38,9 @@ The root `CHANGELOG.md` tracks repo-level events only: new tools added, tools re
 
 ## Tools
 
-| Tool | Language | What it does |
-|------|----------|-------------|
-| [MemPress](MemPress/README.md) | Python 3.9+ | Classifies Linux memory pressure as `ok`, `watch`, `pressure`, or `unknown` using PSI or vmstat heuristics |
+| Tool | Type | Language | What it does |
+|------|------|----------|-------------|
+| [MemPress](MemPress/README.md) | CLI | Python 3.9+ | Classifies Linux memory pressure as `ok`, `watch`, `pressure`, or `unknown` using PSI or vmstat heuristics |
 
 ---
 
@@ -70,9 +70,11 @@ The `shared/` directory holds modules and libraries used by more than one tool. 
 
 **Languages:** Tools can be written in any language, but Python 3.9+ and Bash are preferred for portability on RHEL 8+/Ubuntu 22.04+ targets. Go is acceptable for tools that benefit from single-binary distribution.
 
-**Output modes:** The default output is human-readable. Machine-readable output (JSON) is enabled via a flag (typically `--json`). The JSON schema should be stable and versioned.
+**Tool types:** Each tool defines its own type (CLI, GUI, Service, or similar). There is no requirement that every tool be a CLI or produce parsable output. The type determines what conventions apply: CLI tools should follow the output mode and exit code conventions below; GUI tools follow platform UI guidelines appropriate for the toolkit they use.
 
-**Exit codes:** Document exit codes in the tool's `README.md`. At minimum, distinguish success, classification/operational failure, and fatal/config error. Do not reuse the same exit code for different failure categories.
+**Output modes (CLI tools):** The default output is human-readable. Machine-readable output (JSON) is enabled via a flag (typically `--json`). The JSON schema should be stable and versioned.
+
+**Exit codes (CLI tools):** Document exit codes in the tool's `README.md`. At minimum, distinguish success, classification/operational failure, and fatal/config error. Do not reuse the same exit code for different failure categories.
 
 **No root required:** Tools should run as an unprivileged user wherever possible. If elevated permissions are needed, say so explicitly in the `README.md`.
 
