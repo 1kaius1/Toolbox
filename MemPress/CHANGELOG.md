@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-30
+
+### Added
+- `run_command(cmd)`: subprocess wrapper returning `(stdout, stderr, returncode, error_message)`; captures `OSError` so callers never see an uncaught exception
+- `read_psi()`: parses `/proc/pressure/memory` by keyword and field name; returns all six PSI floats or an error entry on any parse or read failure
+- `read_meminfo()`: parses `/proc/meminfo` by key name; returns `mem_total_mb` and `mem_available_mb` (converted from kB) or an error entry on missing/non-numeric keys
+- `_read_vmstat()`: private helper that reads `/proc/vmstat` into a key-value dict; used by `sample_vmstat_file()` for both samples
+- `sample_vmstat_file(delay, psi_mode)`: reads `/proc/vmstat` twice with `delay` seconds between samples and returns deltas for all required keys; includes `pgmajfault` and `oom_kill` deltas in PSI mode only
+- `collect_vmstat_subprocess(samples, delay)`: runs `vmstat <delay> <samples>` and extracts `si`/`so` columns by header name; validates row count against `--samples`; skips malformed rows
+- `collect_top_processes(top_n)`: runs `ps aux --sort=-%mem` and returns the top N lines; failure yields empty list and an error entry without affecting classification
+
 ## [0.2.0] - 2026-06-30
 
 ### Added

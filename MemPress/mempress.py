@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Name:    mempress.py
-# Version: 0.2.0
+# Version: 0.3.0
 # Author:  Kaius
 #
 # Memory pressure diagnostics for Linux (RHEL 8+, Ubuntu 22.04+, Debian 11+).
@@ -12,10 +12,12 @@
 # See SPEC.md for the full behavioural specification.
 
 import argparse
+import subprocess
 import sys
+import time
 
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 
 class _Parser(argparse.ArgumentParser):
@@ -97,9 +99,219 @@ def detect_capabilities() -> dict:
         return {"use_psi": False}
 
 
+def run_command(cmd):
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        return proc.stdout, proc.stderr, proc.returncode, None
+    except OSError as exc:
+        return "", "", -1, f"{cmd[0]}: {exc}"
+
+
+def read_psi():
+    path = "/proc/pressure/memory"
+    result = {"errors": []}
+    try:
+        with open(path, "r") as fh:
+            content = fh.read()
+    except OSError as exc:
+        result["errors"].append(f"{path}: {type(exc).__name__}: {exc}")
+        return result
+
+    parsed = {}
+    for line in content.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        kind = parts[0]
+        if kind not in ("some", "full"):
+            continue
+        fields = {}
+        for token in parts[1:]:
+            if "=" in token:
+                k, _, v = token.partition("=")
+                fields[k] = v
+        parsed[kind] = fields
+
+    for kind in ("some", "full"):
+        if kind not in parsed:
+            result["errors"].append(f"{path}: missing '{kind}' line")
+            return result
+        for field in ("avg10", "avg60", "avg300"):
+            raw = parsed[kind].get(field)
+            if raw is None:
+                result["errors"].append(f"{path}: missing field '{kind}.{field}'")
+                return result
+            try:
+                result[f"psi_{kind}_{field}"] = float(raw)
+            except ValueError:
+                result["errors"].append(
+                    f"{path}: non-numeric value for '{kind}.{field}': {raw!r}"
+                )
+                return result
+
+    return result
+
+
+def read_meminfo():
+    path = "/proc/meminfo"
+    result = {"errors": []}
+    try:
+        with open(path, "r") as fh:
+            content = fh.read()
+    except OSError as exc:
+        result["errors"].append(f"{path}: {type(exc).__name__}: {exc}")
+        return result
+
+    data = {}
+    for line in content.splitlines():
+        if ":" in line:
+            key, _, rest = line.partition(":")
+            data[key.strip()] = rest.strip()
+
+    for meminfo_key, out_key in (
+        ("MemTotal", "mem_total_mb"),
+        ("MemAvailable", "mem_available_mb"),
+    ):
+        if meminfo_key not in data:
+            result["errors"].append(f"{path}: missing key '{meminfo_key}'")
+            return result
+        parts = data[meminfo_key].split()
+        try:
+            kb = int(parts[0])
+        except (ValueError, IndexError):
+            result["errors"].append(
+                f"{path}: non-numeric value for '{meminfo_key}': {data[meminfo_key]!r}"
+            )
+            return result
+        result[out_key] = kb // 1024
+
+    return result
+
+
+def _read_vmstat():
+    path = "/proc/vmstat"
+    data = {}
+    try:
+        with open(path, "r") as fh:
+            for line in fh:
+                parts = line.split()
+                if len(parts) != 2:
+                    continue
+                try:
+                    data[parts[0]] = int(parts[1])
+                except ValueError:
+                    continue
+    except OSError as exc:
+        return None, f"{path}: {type(exc).__name__}: {exc}"
+    return data, None
+
+
+def sample_vmstat_file(delay, psi_mode):
+    result = {"errors": []}
+    required = ["pgscan_direct", "pgscan_kswapd", "pswpin", "pswpout"]
+    if psi_mode:
+        required += ["pgmajfault", "oom_kill"]
+
+    s1, err = _read_vmstat()
+    if err:
+        result["errors"].append(err)
+        return result
+
+    time.sleep(delay)
+
+    s2, err = _read_vmstat()
+    if err:
+        result["errors"].append(err)
+        return result
+
+    for key in required:
+        if key not in s1 or key not in s2:
+            result["errors"].append(f"/proc/vmstat: missing required key '{key}'")
+            return result
+
+    result["direct_reclaim_delta"] = s2["pgscan_direct"] - s1["pgscan_direct"]
+    result["kswapd_reclaim_delta"] = s2["pgscan_kswapd"] - s1["pgscan_kswapd"]
+    result["pswpin_delta"] = s2["pswpin"] - s1["pswpin"]
+    result["pswpout_delta"] = s2["pswpout"] - s1["pswpout"]
+    if psi_mode:
+        result["pgmajfault_delta"] = s2["pgmajfault"] - s1["pgmajfault"]
+        result["oom_kill_delta"] = s2["oom_kill"] - s1["oom_kill"]
+
+    return result
+
+
+def collect_vmstat_subprocess(samples, delay):
+    result = {"errors": [], "swap_in_samples": [], "swap_out_samples": []}
+    cmd = ["vmstat", str(delay), str(samples)]
+    stdout, stderr, returncode, error_msg = run_command(cmd)
+
+    if error_msg:
+        result["errors"].append(f"{' '.join(cmd)}: {error_msg}")
+        return result
+    if returncode != 0:
+        snippet = stderr[:200] if stderr else ""
+        result["errors"].append(f"{' '.join(cmd)}: exit {returncode}: {snippet}")
+        return result
+
+    header_tokens = None
+    si_col = so_col = None
+    data_rows = []
+
+    for line in stdout.splitlines():
+        tokens = line.split()
+        if not tokens:
+            continue
+        if header_tokens is None:
+            if "si" in tokens and "so" in tokens:
+                header_tokens = tokens
+                si_col = tokens.index("si")
+                so_col = tokens.index("so")
+            continue
+        if len(tokens) != len(header_tokens):
+            continue
+        try:
+            ints = [int(t) for t in tokens]
+        except ValueError:
+            continue
+        data_rows.append((ints[si_col], ints[so_col]))
+
+    if header_tokens is None:
+        result["errors"].append(
+            f"{' '.join(cmd)}: could not find 'si'/'so' column header in output"
+        )
+        return result
+
+    if len(data_rows) < samples:
+        result["errors"].append(
+            f"{' '.join(cmd)}: expected {samples} data rows, got {len(data_rows)}"
+        )
+        return result
+
+    result["swap_in_samples"] = [r[0] for r in data_rows]
+    result["swap_out_samples"] = [r[1] for r in data_rows]
+    return result
+
+
+def collect_top_processes(top_n):
+    result = {"top_processes": [], "errors": []}
+    cmd = ["ps", "aux", "--sort=-%mem"]
+    stdout, stderr, returncode, error_msg = run_command(cmd)
+
+    if error_msg:
+        result["errors"].append(f"{' '.join(cmd)}: {error_msg}")
+        return result
+    if returncode != 0:
+        snippet = stderr[:200] if stderr else ""
+        result["errors"].append(f"{' '.join(cmd)}: exit {returncode}: {snippet}")
+        return result
+
+    result["top_processes"] = stdout.splitlines()[:top_n]
+    return result
+
+
 def run(args):
     capabilities = detect_capabilities()
-    _ = capabilities  # phases 3-7 will consume this
+    _ = capabilities  # phases 4-7 will consume this
 
 
 def main():
