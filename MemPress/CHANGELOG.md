@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-30
+
+### Added
+- `detect_capabilities()`: probes `/proc/pressure/memory` at startup and returns `{"use_psi": bool}`; called first inside `run()` to gate subsequent probe-path selection
+
+## [0.1.0] - 2026-06-30
+
 ### Added
 - Initial implementation of `mempress.py`, a single-file Python 3.9+ CLI with no third-party dependencies
 - PSI (Pressure Stall Information) probe path via `/proc/pressure/memory` for direct kernel measurement of task stall time

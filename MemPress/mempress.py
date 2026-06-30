@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Name:    mempress.py
-# Version: 0.1.0
+# Version: 0.2.0
 # Author:  Kaius
 #
 # Memory pressure diagnostics for Linux (RHEL 8+, Ubuntu 22.04+, Debian 11+).
@@ -15,7 +15,7 @@ import argparse
 import sys
 
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 
 class _Parser(argparse.ArgumentParser):
@@ -88,8 +88,18 @@ def build_parser():
     return p
 
 
+def detect_capabilities() -> dict:
+    try:
+        with open("/proc/pressure/memory", "r"):
+            pass
+        return {"use_psi": True}
+    except OSError:
+        return {"use_psi": False}
+
+
 def run(args):
-    pass  # phases 2-7
+    capabilities = detect_capabilities()
+    _ = capabilities  # phases 3-7 will consume this
 
 
 def main():
