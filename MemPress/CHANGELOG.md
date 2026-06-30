@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-30
+
+### Added
+- `run(args)`: wires all phases together; selects probe path from `detect_capabilities()`; merges probe errors into a single list; calls `derive_signals()`, `classify()`, and the appropriate renderer; exits with code `0` (classified), `2` (unknown), or `1` (unexpected exception via `main()` wrapper)
+- Tool is now fully operational end-to-end in both human-readable and `--json` output modes
+
 ## [0.6.0] - 2026-06-30
 
 ### Added
