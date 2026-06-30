@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-30
+
+### Added
+- `render_human(result)`: section-based report covering header, memory availability, PSI metrics (PSI mode only), swap activity, kernel reclaim activity, top processes, and assessment with status, confidence, reasons, and impact guidance; gracefully shows `n/a` or `(data unavailable)` for any field that could not be collected
+- `render_json(result)`: serialises the full result dict to JSON per SPEC §8; `null` for inapplicable fields is handled by the signals dict passed in from `derive_signals()`
+- `_IMPACT`: mapping from status to one-line impact guidance string used in both the human report and the JSON `summary` field
+
 ## [0.5.0] - 2026-06-30
 
 ### Added

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Name:    mempress.py
-# Version: 0.5.0
+# Version: 0.6.0
 # Author:  Kaius
 #
 # Memory pressure diagnostics for Linux (RHEL 8+, Ubuntu 22.04+, Debian 11+).
@@ -12,12 +12,13 @@
 # See SPEC.md for the full behavioural specification.
 
 import argparse
+import json
 import subprocess
 import sys
 import time
 
 
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 
 
 class _Parser(argparse.ArgumentParser):
@@ -521,6 +522,117 @@ def classify(signals, capabilities, thresholds):
         )
 
     return status, _confidence(status, use_psi), reasons
+
+
+_IMPACT = {
+    "ok":       "System memory is adequate. No action required.",
+    "watch":    "One or more mild indicators present. Monitor for escalation; check top processes.",
+    "pressure": "Active memory pressure detected. Investigate top memory consumers; consider adding RAM or reducing workload.",
+    "unknown":  "Probe failure prevented classification. No definitive conclusion can be drawn. See errors below.",
+}
+
+
+def render_human(result):
+    sig = result["signals"]
+    thr = result["thresholds"]
+    use_psi = sig["use_psi"]
+    out = []
+
+    def ln(s=""):
+        out.append(s)
+
+    ln("=== MemPress Memory Pressure Report ===")
+    ln(f"Host:       {result['host']}")
+    ln(f"Time (UTC): {result['timestamp_utc']}")
+    ln(f"Probe mode: {'PSI' if use_psi else 'Fallback'}")
+
+    ln()
+    ln("--- Memory Availability ---")
+    ma = sig["mem_available_mb"]
+    mt = sig["mem_total_mb"]
+    mp = sig["mem_available_pct"]
+    if ma is not None and mt is not None and mp is not None:
+        tag = "LOW" if sig["low_memory"] else "OK"
+        ln(f"Available:  {ma} MB ({mp}%) of {mt} MB  [{tag}]")
+    else:
+        ln("Available:  (data unavailable)")
+    ln(f"Thresholds: min {thr['min_avail_mb']} MB or {thr['min_avail_pct']}%")
+
+    if use_psi:
+        ln()
+        ln("--- PSI Metrics ---")
+        if sig["psi_some_avg10"] is not None:
+            ln(
+                f"some  avg10={sig['psi_some_avg10']:.2f}"
+                f"  avg60={sig['psi_some_avg60']:.2f}"
+                f"  avg300={sig['psi_some_avg300']:.2f}"
+                f"   [watch: avg60 >= {thr['psi_some_warn']}]"
+            )
+            ln(
+                f"full  avg10={sig['psi_full_avg10']:.2f}"
+                f"  avg60={sig['psi_full_avg60']:.2f}"
+                f"  avg300={sig['psi_full_avg300']:.2f}"
+                f"   [pressure: avg10 >= {thr['psi_full_pressure']}]"
+            )
+        else:
+            ln("(PSI data unavailable)")
+
+    ln()
+    ln("--- Swap Activity ---")
+    if use_psi:
+        pi = sig["pswpin_delta"]
+        po = sig["pswpout_delta"]
+        ln(f"pswpin delta:   {pi if pi is not None else 'n/a'}")
+        ln(f"pswpout delta:  {po if po is not None else 'n/a'}")
+    else:
+        si = sig["swap_in_samples"]
+        so = sig["swap_out_samples"]
+        ops = sig["swap_ops_total"]
+        ln(f"si samples (pages/s):  {si if si is not None else 'n/a'}")
+        ln(f"so samples (pages/s):  {so if so is not None else 'n/a'}")
+        ln(f"swap_ops_total:        {ops if ops is not None else 'n/a'}")
+
+    ln()
+    ln("--- Kernel Reclaim Activity ---")
+    dr = sig["direct_reclaim_delta"]
+    kr = sig["kswapd_reclaim_delta"]
+    ln(f"Direct reclaim (pgscan_direct delta):   {dr if dr is not None else 'n/a'}")
+    ln(f"kswapd reclaim (pgscan_kswapd delta):   {kr if kr is not None else 'n/a'}")
+    if use_psi:
+        mf = sig["pgmajfault_delta"]
+        ln(f"Major faults   (pgmajfault delta):      {mf if mf is not None else 'n/a'}")
+
+    ln()
+    ln("--- Top Memory Processes ---")
+    procs = result.get("top_processes") or []
+    if procs:
+        for p in procs:
+            ln(p)
+    else:
+        ln("(ps data unavailable)")
+
+    ln()
+    ln("--- Assessment ---")
+    ln(f"Status:     {result['status']}")
+    ln(f"Confidence: {result['confidence']}")
+    ln()
+    ln("Why:")
+    for reason in result["reasons"]:
+        ln(f"  - {reason}")
+    ln()
+    ln(f"Impact: {_IMPACT[result['status']]}")
+
+    if result["errors"]:
+        ln()
+        ln("--- Errors ---")
+        for err in result["errors"]:
+            ln(f"  {err}")
+
+    return "\n".join(out)
+
+
+def render_json(result):
+    return json.dumps(result, indent=2)
 
 
 def run(args):
