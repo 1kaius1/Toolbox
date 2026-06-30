@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Name:    mempress.py
-# Version: 0.6.0
+# Version: 0.7.0
 # Author:  Kaius
 #
 # Memory pressure diagnostics for Linux (RHEL 8+, Ubuntu 22.04+, Debian 11+).
@@ -12,13 +12,15 @@
 # See SPEC.md for the full behavioural specification.
 
 import argparse
+import datetime
 import json
+import socket
 import subprocess
 import sys
 import time
 
 
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 
 
 class _Parser(argparse.ArgumentParser):
@@ -637,7 +639,70 @@ def render_json(result):
 
 def run(args):
     capabilities = detect_capabilities()
-    _ = capabilities  # phase 7 will consume this
+    use_psi = capabilities["use_psi"]
+
+    thresholds = {
+        "min_avail_mb":       args.min_avail_mb,
+        "min_avail_pct":      args.min_avail_pct,
+        "psi_some_warn":      args.psi_some_warn,
+        "psi_full_pressure":  args.psi_full_pressure,
+        "severe_swap_ops":    args.severe_swap_ops,
+        "severe_direct_delta": args.severe_direct_delta,
+    }
+
+    errors = []
+    raw = {}
+
+    def _merge(probe_result):
+        errors.extend(probe_result.pop("errors", []))
+        raw.update(probe_result)
+
+    if use_psi:
+        _merge(read_psi())
+        _merge(read_meminfo())
+        _merge(sample_vmstat_file(args.delay, psi_mode=True))
+    else:
+        _merge(read_meminfo())
+        _merge(sample_vmstat_file(args.delay, psi_mode=False))
+        _merge(collect_vmstat_subprocess(args.samples, args.delay))
+
+    top_result = collect_top_processes(args.top_n)
+    top_processes = top_result["top_processes"]
+    errors.extend(top_result["errors"])
+
+    signals = derive_signals(raw, capabilities, thresholds)
+    status, confidence, reasons = classify(signals, capabilities, thresholds)
+
+    result = {
+        "version":       "3.0",
+        "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        ),
+        "host":          socket.gethostname(),
+        "probe_mode":    "psi" if use_psi else "fallback",
+        "status":        status,
+        "confidence":    confidence,
+        "summary":       _IMPACT[status],
+        "signals":       signals,
+        "thresholds": {
+            "min_avail_mb":       thresholds["min_avail_mb"],
+            "min_avail_pct":      thresholds["min_avail_pct"],
+            "psi_some_warn":      thresholds["psi_some_warn"] if use_psi else None,
+            "psi_full_pressure":  thresholds["psi_full_pressure"] if use_psi else None,
+            "severe_swap_ops":    None if use_psi else thresholds["severe_swap_ops"],
+            "severe_direct_delta": thresholds["severe_direct_delta"],
+        },
+        "reasons":       reasons,
+        "errors":        errors,
+        "top_processes": top_processes,
+    }
+
+    if args.json:
+        print(render_json(result))
+    else:
+        print(render_human(result))
+
+    sys.exit(0 if status in ("ok", "watch", "pressure") else 2)
 
 
 def main():
