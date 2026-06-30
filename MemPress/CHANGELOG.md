@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-30
+
+### Added
+- `derive_signals(raw, capabilities, thresholds)`: computes all derived signals defined in SPEC §4.5 (PSI) and §4.6 (fallback) from the merged probe dict; returns a flat signals dict with `null` for signals not applicable to the active probe mode; sets `data_quality_ok` based on presence of all required probe keys; derived signals are all `null` when `data_quality_ok` is false
+
 ## [0.3.0] - 2026-06-30
 
 ### Added
