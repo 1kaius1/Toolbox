@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-30
+
+### Added
+- `classify(signals, capabilities, thresholds)`: returns `(status, confidence, reasons)`; evaluates in order `unknown -> pressure -> watch -> ok`; dispatches to `_classify_psi()` or `_classify_fallback()` based on probe mode; appends OOM reason when `oom_event` is true regardless of status
+- `_classify_psi(signals)`: PSI path classification per SPEC §5.2; `pressure` on full-stall or some-stall with corroboration; `watch` on any elevated signal without corroboration
+- `_classify_fallback(signals)`: fallback path classification per SPEC §5.3; `pressure` on combined signal conditions; `watch` on any single watch signal
+- `_confidence(status, use_psi)`: maps status and probe mode to confidence tier per SPEC §6 table
+
 ## [0.4.0] - 2026-06-30
 
 ### Added
