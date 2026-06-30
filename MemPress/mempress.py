@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Name:    mempress.py
-# Version: 0.4.0
+# Version: 0.5.0
 # Author:  Kaius
 #
 # Memory pressure diagnostics for Linux (RHEL 8+, Ubuntu 22.04+, Debian 11+).
@@ -17,7 +17,7 @@ import sys
 import time
 
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 
 
 class _Parser(argparse.ArgumentParser):
@@ -391,9 +391,141 @@ def derive_signals(raw, capabilities, thresholds):
     return s
 
 
+def _classify_psi(signals):
+    s = signals
+
+    if s["psi_full_elevated"]:
+        return "pressure", [
+            f"PSI full.avg10={s['psi_full_avg10']:.2f} at or above pressure threshold",
+        ]
+
+    if s["psi_some_elevated"] and (s["low_memory"] or s["direct_reclaim_active"]):
+        reasons = [f"PSI some.avg60={s['psi_some_avg60']:.2f} elevated"]
+        if s["low_memory"]:
+            reasons.append(
+                f"available memory {s['mem_available_mb']} MB"
+                f" ({s['mem_available_pct']}%) below threshold"
+            )
+        if s["direct_reclaim_active"]:
+            reasons.append(
+                f"direct reclaim active (pgscan_direct delta={s['direct_reclaim_delta']})"
+            )
+        return "pressure", reasons
+
+    reasons = []
+    if s["psi_some_elevated"]:
+        reasons.append(f"PSI some.avg60={s['psi_some_avg60']:.2f} elevated")
+    if s["low_memory"]:
+        reasons.append(
+            f"available memory {s['mem_available_mb']} MB"
+            f" ({s['mem_available_pct']}%) below threshold"
+        )
+    if s["direct_reclaim_active"]:
+        reasons.append(
+            f"direct reclaim active (pgscan_direct delta={s['direct_reclaim_delta']})"
+        )
+    if s["swap_active"]:
+        reasons.append(
+            f"swap activity detected"
+            f" (pswpin delta={s['pswpin_delta']}, pswpout delta={s['pswpout_delta']})"
+        )
+    if reasons:
+        return "watch", reasons
+
+    return "ok", ["no memory pressure signals detected"]
+
+
+def _classify_fallback(signals):
+    s = signals
+    sa = s["swap_active"]
+    dr = s["direct_reclaim_active"]
+    lm = s["low_memory"]
+
+    if sa and dr:
+        return "pressure", [
+            "swap active and direct reclaim active simultaneously",
+            f"swap_ops_total={s['swap_ops_total']}",
+            f"pgscan_direct delta={s['direct_reclaim_delta']}",
+        ]
+
+    if dr and lm:
+        return "pressure", [
+            "direct reclaim active with low available memory",
+            f"pgscan_direct delta={s['direct_reclaim_delta']}",
+            f"available memory {s['mem_available_mb']} MB"
+            f" ({s['mem_available_pct']}%) below threshold",
+        ]
+
+    if sa and lm and (s["severe_swap"] or s["severe_direct"]):
+        reasons = [
+            "swap active with low available memory and severe intensity",
+            f"swap_ops_total={s['swap_ops_total']}",
+            f"available memory {s['mem_available_mb']} MB"
+            f" ({s['mem_available_pct']}%) below threshold",
+        ]
+        if s["severe_swap"]:
+            reasons.append(
+                f"severe swap rate (swap_ops_total={s['swap_ops_total']} at or above threshold)"
+            )
+        if s["severe_direct"]:
+            reasons.append(
+                f"severe direct reclaim (pgscan_direct delta={s['direct_reclaim_delta']}"
+                f" at or above threshold)"
+            )
+        return "pressure", reasons
+
+    reasons = []
+    if sa:
+        reasons.append(f"swap activity detected (swap_ops_total={s['swap_ops_total']})")
+    if dr:
+        reasons.append(
+            f"direct reclaim active (pgscan_direct delta={s['direct_reclaim_delta']})"
+        )
+    if lm:
+        reasons.append(
+            f"available memory {s['mem_available_mb']} MB"
+            f" ({s['mem_available_pct']}%) below threshold"
+        )
+    if s["kswapd_active"]:
+        reasons.append(
+            f"kswapd active (pgscan_kswapd delta={s['kswapd_reclaim_delta']})"
+        )
+    if reasons:
+        return "watch", reasons
+
+    return "ok", ["no memory pressure signals detected"]
+
+
+def _confidence(status, use_psi):
+    if status == "unknown":
+        return "low"
+    if use_psi:
+        return "high" if status in ("pressure", "ok") else "medium"
+    return "medium" if status in ("pressure", "ok") else "low"
+
+
+def classify(signals, capabilities, thresholds):
+    use_psi = capabilities["use_psi"]
+
+    if not signals["data_quality_ok"]:
+        return "unknown", "low", ["probe failure prevented classification; see errors"]
+
+    if use_psi:
+        status, reasons = _classify_psi(signals)
+    else:
+        status, reasons = _classify_fallback(signals)
+
+    if signals.get("oom_event"):
+        reasons.append(
+            f"OOM event detected (oom_kill delta={signals['oom_kill_delta']})"
+        )
+
+    return status, _confidence(status, use_psi), reasons
+
+
 def run(args):
     capabilities = detect_capabilities()
-    _ = capabilities  # phases 5-7 will consume this
+    _ = capabilities  # phase 7 will consume this
 
 
 def main():
