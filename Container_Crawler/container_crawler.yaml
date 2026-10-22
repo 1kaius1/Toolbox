@@ -4,10 +4,10 @@
 # CSV logs on the control node.
 #
 # Usage (expects container_crawler.py in the same directory as this file):
-#   ansible-playbook -i <inventory> container_crawler_playbook.yaml
+#   ansible-playbook -i <inventory> container_crawler.yaml
 #
 # To use the script from another location:
-#   ansible-playbook -i <inventory> container_crawler_playbook.yaml \
+#   ansible-playbook -i <inventory> container_crawler.yaml \
 #     -e cc_script=/path/to/container_crawler.py
 #
 # Results: one file per host in Logs/ next to this file, named

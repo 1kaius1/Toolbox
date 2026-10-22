@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- `container_crawler_playbook.yaml`: Ansible playbook that runs the tool as root on every host in an inventory, fetches each host's CSV log to `Logs/Container_Crawler-<short hostname>.log` next to the playbook, and removes the remote log
+- `container_crawler.yaml`: Ansible playbook that runs the tool as root on every host in an inventory, fetches each host's CSV log to `Logs/Container_Crawler-<short hostname>.log` next to the playbook, and removes the remote log
 
 ## [0.2.0] - 2026-10-22
 
