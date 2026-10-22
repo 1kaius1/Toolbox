@@ -41,6 +41,7 @@ The root `CHANGELOG.md` tracks repo-level events only: new tools added, tools re
 | Tool | Type | Language | What it does |
 |------|------|----------|-------------|
 | [MemPress](MemPress/README.md) | CLI | Python 3.9+ | Classifies Linux memory pressure as `ok`, `watch`, `pressure`, or `unknown` using PSI or vmstat heuristics |
+| [Container_Crawler](Container_Crawler/README.md) | CLI | Python 3.6+ | Runs checks inside every running Docker/Podman container; first check lists PHP packages and versions, with live output and a CSV log |
 
 ---
 
