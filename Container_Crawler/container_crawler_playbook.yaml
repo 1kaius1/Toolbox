@@ -10,12 +10,16 @@
 #   ansible-playbook -i <inventory> container_crawler_playbook.yaml \
 #     -e cc_script=/path/to/container_crawler.py
 #
-# Results: cc_results/<host>/tmp/Container_Crawler.log next to this file
+# Results: one file per host in Logs/ next to this file, named
+# Container_Crawler-<short hostname>.log (the host's own `hostname -s`, which is
+# also the hostname column in the CSV; it can differ from the inventory name).
+# Two hosts with the same short hostname would overwrite each other's file.
 #
-# Merge into one CSV (the header is identical in every file):
-#   cd cc_results
-#   { head -n1 "$(ls */tmp/Container_Crawler.log | head -n1)"
-#     tail -q -n +2 */tmp/Container_Crawler.log; } > all_hosts.csv
+# Aggregate into one CSV. Every file starts with the same header row, so a plain
+# `cat` repeats it; this keeps only the first. The glob skips Aggregate.log, so
+# it is safe to re-run in the same directory:
+#   cd Logs
+#   awk 'FNR == 1 && NR != 1 { next } 1' Container_Crawler-*.log > Aggregate.log
 #
 # Exit code 2 from the tool means some container could not be checked; the
 # status/error columns in the log say which. Exit code 1 usually means the host
@@ -23,11 +27,15 @@
 - name: Run Container_Crawler and collect logs
   hosts: all
   become: true
-  gather_facts: false
+  # The minimal subset is enough for ansible_facts['hostname'], the host's own
+  # short hostname, and keeps fact gathering fast.
+  gather_facts: true
+  gather_subset:
+    - min
   vars:
     cc_script: "{{ playbook_dir }}/container_crawler.py"
     cc_log: /tmp/Container_Crawler.log
-    cc_results: "{{ playbook_dir }}/cc_results"
+    cc_logs: "{{ playbook_dir }}/Logs"
   tasks:
     - name: Run Container_Crawler
       ansible.builtin.script:
@@ -39,7 +47,8 @@
     - name: Fetch the log to the control node
       ansible.builtin.fetch:
         src: "{{ cc_log }}"
-        dest: "{{ cc_results }}/"
+        dest: "{{ cc_logs }}/Container_Crawler-{{ ansible_facts['hostname'] }}.log"
+        flat: true
 
     # The log lists container names and images and /tmp is world-readable.
     - name: Remove the log from the host
