@@ -183,6 +183,9 @@ contract. They can be added when more checks are added. This file is the saved p
 
 Implementation notes (differences from the plan above):
 - Added exit code `130` for Ctrl-C.
+- The CSV log described above (one row per package, PHP containers only) was replaced
+  in 0.2.0 by one row per inspected container with list columns; see README "CSV Log".
+  A header-only log could not distinguish a clean host from a failed scan.
 - The `php*` package match includes PHP applications such as `phpMyAdmin`.
 - Verified against stubbed runtimes with fake container filesystems, and against a
   real throwaway Podman 4.9.3 container (dpkg path, binary-only PHP).

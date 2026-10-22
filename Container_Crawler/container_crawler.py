@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Name:    container_crawler.py
-# Version: 0.1.1
+# Version: 0.2.0
 # Author:  Kaius
 #
 # Iterates every running Docker/Podman container on the host and runs checks
@@ -26,7 +26,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
-VERSION = "0.1.1"
+VERSION = "0.2.0"
 
 EXIT_OK = 0
 EXIT_USAGE = 1
@@ -82,9 +82,12 @@ PHP_VERSION_RE = re.compile(r"^PHP (\d+\.\d+\.\d+\S*)")
 # apk prints name-version-rN; the version starts at the last "-<digit>".
 APK_PKG_RE = re.compile(r"^(?P<name>.+)-(?P<version>\d[\w.]*-r\d+)$")
 
+# One row per container, so a row proves the container was inspected. The
+# php_* columns are empty (not 0) when the php check did not produce a result.
 CSV_FIELDS = [
-    "hostname", "runtime", "container_id", "container_name", "image",
-    "package_manager", "kind", "name", "version",
+    "timestamp", "hostname", "runtime", "container_id", "container_name",
+    "image", "status", "package_manager", "php_package_count", "php_packages",
+    "php_binary_count", "php_binaries", "php_versions", "error",
 ]
 
 
@@ -306,19 +309,46 @@ def render_cmd(res):
     return lines
 
 
-def csv_rows_php(host, c, res):
-    if res["status"] != "found":
-        return []
-    base = [host, c["runtime"], c["id"], c["name"], c["image"], res["package_manager"]]
-    rows = [base + ["package", p["name"], p["version"]] for p in res["packages"]]
-    if not res["packages"]:
-        # Official php:* images have no php packages; without these rows the
-        # container would be missing from the log entirely.
-        rows = [base + ["binary", b["name"], b["version"]] for b in res["binaries"]]
-    return rows
+CHECKS = {"php": {"run": check_php, "render": render_php}}
 
 
-CHECKS = {"php": {"run": check_php, "render": render_php, "rows": csv_rows_php}}
+def now_stamp():
+    return datetime.datetime.now().isoformat(timespec="seconds")
+
+
+def log_row(host, c):
+    """Build the CSV row for a scanned container.
+
+    List columns are ';'-separated: packages as name=version, binaries as
+    name=version@path.
+    """
+    results = list(c["checks"].values()) + ([c["cmd"]] if c["cmd"] else [])
+    errors = [r["error"] for r in results if r["status"] == "error"]
+    php = c["checks"].get("php")
+    if errors:
+        status = "error"
+    else:
+        status = php["status"] if php else "ok"
+    row = [now_stamp(), host, c["runtime"], c["id"], c["name"], c["image"], status]
+    if php and php["status"] != "error":
+        row += [
+            php["package_manager"],
+            len(php["packages"]),
+            ";".join(f"{p['name']}={p['version']}" for p in php["packages"]),
+            len(php["binaries"]),
+            ";".join(f"{b['name']}={b['version']}@{b['path']}" for b in php["binaries"]),
+            ";".join(sorted({b["version"] for b in php["binaries"]})),
+        ]
+    else:
+        row += [""] * 6
+    row.append("; ".join(errors))
+    return row
+
+
+def runtime_error_row(host, runtime, err):
+    """A listing failure has no containers, so it gets its own row; otherwise a
+    failed `ps` would leave a header-only log that looks like a clean host."""
+    return [now_stamp(), host, runtime, "", "", "", "runtime_error"] + [""] * 6 + [err]
 
 
 # ---------------------------------------------------------------------------
@@ -503,6 +533,8 @@ def run(args):
             if err:
                 runtime_errors.append(f"{rt}: {err}")
                 print(f"container_crawler: {rt}: {err}", file=sys.stderr)
+                writer.writerow(runtime_error_row(host, rt, err))
+                log_fh.flush()
             containers.extend(found)
 
         total = len(containers)
@@ -520,9 +552,7 @@ def run(args):
                 emit(header_line(i, total, c))
 
         def on_done(i, c):
-            for name in checks:
-                for row in CHECKS[name]["rows"](host, c, c["checks"][name]):
-                    writer.writerow(row)
+            writer.writerow(log_row(host, c))
             log_fh.flush()
             if args.json:
                 return

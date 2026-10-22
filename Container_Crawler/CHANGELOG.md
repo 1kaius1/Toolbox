@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-22
+
+### Changed
+- CSV log now has one row per inspected container, including containers with no PHP and containers that could not be checked, so a clean host no longer produces a header-only file. Columns changed: `kind`, `name` and `version` are replaced by `status`, `php_package_count`, `php_packages`, `php_binary_count`, `php_binaries`, `php_versions` and `error`, and a `timestamp` column is added.
+- `--cmd` now also writes one CSV row per container
+
+### Added
+- A `runtime_error` CSV row when a runtime cannot list its containers, so a failed `ps` is distinguishable from a host with no containers
+
 ## [0.1.1] - 2026-10-22
 
 ### Fixed

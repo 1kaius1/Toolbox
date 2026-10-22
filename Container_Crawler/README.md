@@ -96,19 +96,43 @@ With `--json`, progress goes to stderr and one JSON object is written to stdout 
 
 A CSV log is always written. The path is `--log FILE`, or `Container_Crawler-YYYYMMDD_HHMMSS.log` in the current directory by default. An existing file at the path is overwritten. The file is flushed after every container, so it is usable even if the scan is interrupted.
 
+One row per inspected container, including containers with no PHP and containers that could not be checked. A row proves the container was looked at. It carries everything the console summary is built from.
+
 | Column | Description |
 |--------|-------------|
+| `timestamp` | When the container's scan finished (local time, ISO 8601, seconds) |
 | `hostname` | Short hostname of the host (domain stripped) |
 | `runtime` | `docker` or `podman` |
 | `container_id` | Short container ID |
 | `container_name` | Container name |
 | `image` | Image reference |
+| `status` | `found`, `not_found`, `error`, `ok`, or `runtime_error` (see below) |
 | `package_manager` | `dpkg`, `rpm`, `apk`, or `none` |
-| `kind` | `package` or `binary` |
-| `name` | Package name, or binary name |
-| `version` | Package version, or the PHP version the binary reported |
+| `php_package_count` | Number of installed `php*` packages |
+| `php_packages` | `;`-separated `name=version` pairs |
+| `php_binary_count` | Number of distinct PHP binaries found on `PATH` |
+| `php_binaries` | `;`-separated `name=version@path` entries |
+| `php_versions` | `;`-separated distinct versions reported by the binaries (what `PHP versions seen` in the summary counts) |
+| `error` | Why the container could not be checked; empty otherwise |
 
-One row per PHP package. Containers with PHP packages get `package` rows only. A container with PHP but no PHP packages (official `php:*` images) gets `binary` rows so it still appears in the log. Containers without PHP, and containers that errored, produce no rows.
+`status` values:
+
+- `found`: PHP packages or binaries were found
+- `not_found`: the container was checked and has no PHP
+- `error`: the container could not be checked (no `sh`, exec denied, timeout); the `error` column says why, and the `php_*` columns are empty
+- `ok`: only when `--cmd` was used without the `php` check and the command ran
+- `runtime_error`: the runtime could not list containers (daemon unreachable, permission denied). This row has no container fields, only `runtime` and `error`.
+
+Empty `php_*` columns mean "not determined", while `0` means "checked, none". A log with only the header row means the runtime was reachable and had no running containers (or the tool exited with code 1 before scanning).
+
+Example:
+
+```
+timestamp,hostname,runtime,container_id,container_name,image,status,package_manager,php_package_count,php_packages,php_binary_count,php_binaries,php_versions,error
+2026-10-22T17:05:48,web01,docker,3f2a1b9c0d1e,web-app,php:8.2-fpm,found,dpkg,2,php8.2-cli=8.2.12-1;php8.2-fpm=8.2.12-1,1,php8.2=8.2.12@/usr/bin/php8.2,8.2.12,
+2026-10-22T17:05:49,web01,docker,9a8b7c6d5e4f,nginx,nginx:1.25,not_found,dpkg,0,,0,,,
+2026-10-22T17:05:49,web01,docker,1c2d3e4f5a6b,distro,gcr.io/distroless/static,error,,,,,,,exec: "sh": executable file not found in $PATH
+```
 
 ---
 
@@ -130,7 +154,7 @@ One row per PHP package. Containers with PHP packages get `package` rows only. A
 |------|---------|-------------|
 | `--log <file>` | `Container_Crawler-YYYYMMDD_HHMMSS.log` | CSV log path |
 | `--check <name>` | `php` | Check to run; repeatable. Available: `php`. Not used when only `--cmd` is given. |
-| `--cmd <command>` | none | Run `sh -c <command>` in every container and show its output and exit code. Writes no CSV rows. |
+| `--cmd <command>` | none | Run `sh -c <command>` in every container and show its output and exit code. The CSV still gets one row per container (`status` `ok` or `error`, `php_*` columns empty). |
 | `--runtime <name>` | `all` | `docker`, `podman`, or `all` (every installed runtime; a `docker` that is really podman is skipped, see Limitations) |
 | `--timeout <sec>` | `15` | Per-command timeout. Min: 1. |
 | `--workers <n>` | `1` | Containers scanned in parallel. With more than 1, results print in completion order. Min: 1. |
