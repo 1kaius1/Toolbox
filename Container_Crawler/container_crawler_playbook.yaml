@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Run Container_Crawler as root on every host in an inventory and collect the
+# CSV logs on the control node.
+#
+# Usage (expects container_crawler.py in the same directory as this file):
+#   ansible-playbook -i <inventory> container_crawler_playbook.yaml
+#
+# To use the script from another location:
+#   ansible-playbook -i <inventory> container_crawler_playbook.yaml \
+#     -e cc_script=/path/to/container_crawler.py
+#
+# Results: cc_results/<host>/tmp/Container_Crawler.log next to this file
+#
+# Merge into one CSV (the header is identical in every file):
+#   cd cc_results
+#   { head -n1 "$(ls */tmp/Container_Crawler.log | head -n1)"
+#     tail -q -n +2 */tmp/Container_Crawler.log; } > all_hosts.csv
+#
+# Exit code 2 from the tool means some container could not be checked; the
+# status/error columns in the log say which. Exit code 1 usually means the host
+# has no docker or podman, and that host shows as failed in the play recap.
+- name: Run Container_Crawler and collect logs
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    cc_script: "{{ playbook_dir }}/container_crawler.py"
+    cc_log: /tmp/Container_Crawler.log
+    cc_results: "{{ playbook_dir }}/cc_results"
+  tasks:
+    - name: Run Container_Crawler
+      ansible.builtin.script:
+        cmd: "{{ cc_script }} --log {{ cc_log }}"
+      register: cc
+      changed_when: false
+      failed_when: cc.rc not in [0, 2]
+
+    - name: Fetch the log to the control node
+      ansible.builtin.fetch:
+        src: "{{ cc_log }}"
+        dest: "{{ cc_results }}/"
+
+    # The log lists container names and images and /tmp is world-readable.
+    - name: Remove the log from the host
+      ansible.builtin.file:
+        path: "{{ cc_log }}"
+        state: absent
