@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Name:    container_crawler.py
-# Version: 0.1.0
+# Version: 0.1.1
 # Author:  Kaius
 #
 # Iterates every running Docker/Podman container on the host and runs checks
@@ -26,7 +26,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 
 EXIT_OK = 0
 EXIT_USAGE = 1
@@ -150,9 +150,36 @@ def exec_in(runtime, cid, argv, timeout):
     return run_cmd([runtime, "exec", cid] + argv, timeout)
 
 
+def is_podman_alias(path):
+    """True when the 'docker' at path is really podman (podman-docker package).
+
+    The package ships either a symlink to podman or a wrapper script that execs
+    it, so check the resolved name first and fall back to the version banner.
+    """
+    if os.path.basename(os.path.realpath(path)) == "podman":
+        return True
+    rc, out, err = run_cmd([path, "--version"], 5)
+    return rc == 0 and "podman" in (out + err).lower()
+
+
 def detect_runtimes(wanted):
+    """Return (runtimes, notes). notes are human-readable detection remarks."""
     names = RUNTIMES if wanted == "all" else (wanted,)
-    return [n for n in names if shutil.which(n)]
+    runtimes = []
+    notes = []
+    for name in names:
+        path = shutil.which(name)
+        if not path:
+            continue
+        if name == "docker" and is_podman_alias(path):
+            if wanted == "all" and shutil.which("podman"):
+                # Scanning both would list every container twice, the first
+                # time mislabeled as docker.
+                notes.append("docker on PATH is a podman alias (podman-docker); scanning podman only")
+                continue
+            notes.append("docker on PATH is a podman alias (podman-docker); containers are podman's")
+        runtimes.append(name)
+    return runtimes, notes
 
 
 def list_containers(runtime, timeout):
@@ -379,6 +406,8 @@ def print_summary(s, checks):
             f"{k} ({v})" for k, v in sorted(s["package_managers"].items())
         )
         emit(f"Package managers      : {pms or 'none'}")
+    for note in s["notes"]:
+        emit(f"Note                  : {note}")
     for err in s["runtime_errors"]:
         emit(f"Runtime error         : {err}")
     emit(f"Log file              : {s['log_file']}")
@@ -459,7 +488,9 @@ def run(args):
         writer.writerow(CSV_FIELDS)
         log_fh.flush()
 
-        runtimes = detect_runtimes(args.runtime)
+        runtimes, notes = detect_runtimes(args.runtime)
+        for note in notes:
+            print(f"container_crawler: {note}", file=sys.stderr)
         if not runtimes:
             wanted = "docker or podman" if args.runtime == "all" else args.runtime
             print(f"container_crawler: {wanted} not found on PATH", file=sys.stderr)
@@ -519,6 +550,7 @@ def run(args):
                     on_done(done[0], fut.result())
 
         summary = build_summary(containers, runtimes, runtime_errors, checks, log_path)
+        summary["notes"] = notes
         if args.json:
             doc = {
                 "tool": "container_crawler",

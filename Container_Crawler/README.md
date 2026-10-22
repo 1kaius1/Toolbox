@@ -131,7 +131,7 @@ One row per PHP package. Containers with PHP packages get `package` rows only. A
 | `--log <file>` | `Container_Crawler-YYYYMMDD_HHMMSS.log` | CSV log path |
 | `--check <name>` | `php` | Check to run; repeatable. Available: `php`. Not used when only `--cmd` is given. |
 | `--cmd <command>` | none | Run `sh -c <command>` in every container and show its output and exit code. Writes no CSV rows. |
-| `--runtime <name>` | `all` | `docker`, `podman`, or `all` (every installed runtime) |
+| `--runtime <name>` | `all` | `docker`, `podman`, or `all` (every installed runtime; a `docker` that is really podman is skipped, see Limitations) |
 | `--timeout <sec>` | `15` | Per-command timeout. Min: 1. |
 | `--workers <n>` | `1` | Containers scanned in parallel. With more than 1, results print in completion order. Min: 1. |
 | `--only-found` | off | List only containers where a check found something or failed |
@@ -146,3 +146,5 @@ One row per PHP package. Containers with PHP packages get `package` rows only. A
 - Needs a shell in the container. Distroless and scratch images are reported as errors.
 - A container's own `php` binary is executed (`php -v`) to read its version.
 - Docker and rootful Podman are the supported setups. Rootless Podman works but only sees the invoking user's containers.
+- The `podman-docker` package installs a `docker` command that is really podman. It is detected (the command resolves to `podman`, or `docker --version` mentions podman) and skipped for `--runtime all`, so containers are not listed twice. A note appears on stderr and in the summary. `--runtime docker` on such a host scans it anyway.
+- Detection does not cover a real Docker CLI pointed at a Podman socket through `DOCKER_HOST`; on that setup use `--runtime podman` or `--runtime docker`, not `all`.
